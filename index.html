@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Digital Memory Wall</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main id="main">
+
+<!-- LANGKAH 1: Data diri -->
+<section id="s-form">
+  <h1>Digital Memory Wall</h1>
+  <p class="sub">Tinggalkan kenangan kamu di dinding digital kami.</p>
+  <div class="card">
+    <label for="name">Nama</label>
+    <input type="text" id="name" maxlength="40" autocomplete="name" placeholder="Nama lengkap">
+    <label for="phone">No. handphone</label>
+    <input type="tel" id="phone" maxlength="20" inputmode="tel" autocomplete="tel" placeholder="08xxxxxxxxxx">
+    <label for="email">Alamat email</label>
+    <input type="email" id="email" maxlength="80" inputmode="email" autocomplete="email" placeholder="nama@email.com">
+    <button id="btn-next" disabled>Lanjut, buka kamera</button>
+  </div>
+  <p class="note"><a href="#wall" style="color:var(--acc)">Lihat Memory Wall</a></p>
+</section>
+
+<!-- LANGKAH 2: Kamera -->
+<section id="s-cam" class="hidden">
+  <h1>Siap selfie?</h1>
+  <p class="sub" id="cam-sub">Izinkan akses kamera saat browser menanyakan.</p>
+  <div class="card">
+    <div class="stage" id="stage">
+      <video id="video" class="mirror" autoplay playsinline muted></video>
+      <img id="shot" class="hidden" alt="Hasil selfie">
+    </div>
+    <p class="err hidden" id="cam-err"></p>
+    <div id="cam-btns">
+      <button id="btn-snap">Ambil foto</button>
+      <button class="ghost" id="btn-file">Kamera tidak bisa dibuka? Pakai kamera bawaan HP</button>
+    </div>
+    <div id="rev-btns" class="hidden">
+      <div class="row">
+        <button class="ghost" id="btn-retake">Ulangi</button>
+        <button id="btn-submit">Kirim foto</button>
+      </div>
+    </div>
+    <input type="file" id="file" accept="image/*" capture="user" class="hidden">
+  </div>
+</section>
+
+<!-- LANGKAH 3: Selesai -->
+<section id="s-done" class="hidden">
+  <h1>Terima kasih!</h1>
+  <p class="sub">Fotomu sudah masuk ke Memory Wall.</p>
+  <div class="card">
+    <div class="stage pinkframe"><img id="done-img" alt="Fotomu"></div>
+    <button id="btn-dl">Unduh foto saya</button>
+    <a class="btn ghost" href="#wall" style="border:1px solid var(--line);background:transparent;color:var(--ink)">Lihat Memory Wall</a>
+    <p class="note hidden" id="local-note">Mode demo: database bersama belum tersedia di tampilan ini, jadi foto hanya tersimpan di sesi ini.</p>
+  </div>
+</section>
+
+<!-- HALAMAN DINDING -->
+<section id="s-wall" class="hidden">
+  <div class="top hidden">
+    <div><h1>Memory Wall</h1><p class="sub" style="margin:0" id="count">Memuat...</p></div>
+    <a href="#">+ Tambah fotomu</a>
+  </div>
+  <div class="grid" id="grid"></div>
+  <p class="empty hidden" id="empty">Belum ada foto. Jadilah yang pertama!</p>
+</section>
+
+</main>
+<canvas id="cv" class="hidden"></canvas>
+
+<script>
+(function(){
+  var $ = function(id){ return document.getElementById(id); };
+  var state = { name:"", phone:"", email:"", img:null, stream:null, db:null, localList:[], unsub:null };
+
+  /* ---------- Routing sederhana (hash #wall) ---------- */
+  function show(id){
+    ["s-form","s-cam","s-done","s-wall"].forEach(function(s){ $(s).classList.toggle("hidden", s!==id); });
+    $("main").classList.toggle("wide", id==="s-wall");
+  }
+  function route(){
+    if(location.hash==="#wall"){ stopCam(); show("s-wall"); startWall(); }
+    else if(!$("s-wall").classList.contains("hidden")||!state.name){ show("s-form"); }
+  }
+  window.addEventListener("hashchange", route);
+
+  /* ---------- Form ---------- */
+  function validate(){
+    var okName=$("name").value.trim().length>0;
+    var okPhone=/^\+?[0-9][0-9\s\-]{7,17}$/.test($("phone").value.trim());
+    var okEmail=/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test($("email").value.trim());
+    $("btn-next").disabled = !(okName && okPhone && okEmail);
+  }
+  $("name").addEventListener("input", validate);
+  $("phone").addEventListener("input", validate);
+  $("email").addEventListener("input", validate);
+  $("btn-next").addEventListener("click", function(){
+    state.name = $("name").value.trim();
+    state.phone = $("phone").value.trim();
+    state.email = $("email").value.trim();
+    show("s-cam"); startCam();
+  });
+
+  /* ---------- Kamera ---------- */
+  function setErr(msg){ var e=$("cam-err"); e.textContent=msg||""; e.classList.toggle("hidden",!msg); }
+  function startCam(){
+    setErr(""); resetShot();
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      setErr("Browser ini tidak mendukung akses kamera langsung. Gunakan tombol kamera bawaan HP di bawah."); return;
+    }
+    navigator.mediaDevices.getUserMedia({ video:{ facingMode:"user", width:{ideal:1280}, height:{ideal:1280} }, audio:false })
+      .then(function(s){ state.stream=s; $("video").srcObject=s; })
+      .catch(function(){ setErr("Akses kamera ditolak atau tidak tersedia. Izinkan kamera di pengaturan browser, atau pakai kamera bawaan HP."); });
+  }
+  function stopCam(){
+    if(state.stream){ state.stream.getTracks().forEach(function(t){ t.stop(); }); state.stream=null; }
+  }
+  function resetShot(){
+    state.img=null;
+    $("shot").classList.add("hidden"); $("video").classList.remove("hidden");
+    $("cam-btns").classList.remove("hidden"); $("rev-btns").classList.add("hidden");
+    $("btn-submit").disabled=false; $("btn-submit").textContent="Kirim foto";
+  }
+  function showReview(dataUrl){
+    state.img=dataUrl; $("shot").src=dataUrl;
+    $("video").classList.add("hidden"); $("shot").classList.remove("hidden");
+    $("cam-btns").classList.add("hidden"); $("rev-btns").classList.remove("hidden");
+  }
+  // Perkecil gambar agar ringan disimpan (sisi terpanjang 640px, JPEG)
+  function toDataUrl(src, w, h, mirror){
+    var cv=$("cv"), max=640, sc=Math.min(1, max/Math.max(w,h));
+    cv.width=Math.round(w*sc); cv.height=Math.round(h*sc);
+    var c=cv.getContext("2d");
+    if(mirror){ c.translate(cv.width,0); c.scale(-1,1); }
+    c.drawImage(src,0,0,cv.width,cv.height);
+    return cv.toDataURL("image/jpeg",0.78);
+  }
+  $("btn-snap").addEventListener("click", function(){
+    var v=$("video");
+    if(!v.videoWidth){ setErr("Kamera belum siap, tunggu sebentar."); return; }
+    // Potong ke rasio 3:4 agar sama dengan tampilan
+    var vw=v.videoWidth, vh=v.videoHeight, tw=Math.min(vw, vh*3/4), th=tw*4/3;
+    var tmp=document.createElement("canvas"); tmp.width=tw; tmp.height=th;
+    var t=tmp.getContext("2d"); t.translate(tw,0); t.scale(-1,1);
+    t.drawImage(v,(vw-tw)/2,(vh-th)/2,tw,th,0,0,tw,th);
+    showReview(toDataUrl(tmp,tw,th,false));
+    stopCam();
+  });
+  $("btn-file").addEventListener("click", function(){ $("file").click(); });
+  $("file").addEventListener("change", function(e){
+    var f=e.target.files[0]; if(!f) return;
+    var img=new Image(), url=URL.createObjectURL(f);
+    img.onload=function(){
+      var w=img.naturalWidth,h=img.naturalHeight,tw=Math.min(w,h*3/4),th=tw*4/3;
+      var tmp=document.createElement("canvas"); tmp.width=tw; tmp.height=th;
+      tmp.getContext("2d").drawImage(img,(w-tw)/2,(h-th)/2,tw,th,0,0,tw,th);
+      URL.revokeObjectURL(url); stopCam(); setErr(""); showReview(toDataUrl(tmp,tw,th,false));
+    };
+    img.src=url;
+  });
+  $("btn-retake").addEventListener("click", function(){ startCam(); });
+
+  /* ---------- Database bersama (opsional) ---------- */
+  function getDb(){
+    if(state.db!==null) return Promise.resolve(state.db||null);
+    if(!window.claude||!window.claude.use){ state.db=false; return Promise.resolve(null); }
+    return window.claude.use("db").then(function(d){ state.db=d||false; return d||null; }).catch(function(){ state.db=false; return null; });
+  }
+
+  /* ---------- Submit ---------- */
+  $("btn-submit").addEventListener("click", function(){
+    var b=$("btn-submit"); b.disabled=true; b.textContent="Mengirim...";
+    var item={ name:state.name, img:state.img, ts:Date.now() };
+    var contact={ name:state.name, phone:state.phone, email:state.email, ts:item.ts };
+    getDb().then(function(db){
+      if(!db){ state.localList.unshift(item); return false; }
+      return db.collection("memories").add(item).then(function(){
+        // Kontak disimpan terpisah dari foto agar tidak tampil di dinding
+        return db.collection("contacts").add(contact).catch(function(){}).then(function(){ return true; });
+      });
+    }).then(function(shared){
+      $("done-img").src=item.img;
+      $("local-note").classList.toggle("hidden", shared!==false);
+      show("s-done");
+    }).catch(function(){
+      state.localList.unshift(item);
+      $("done-img").src=item.img; $("local-note").classList.remove("hidden"); show("s-done");
+    });
+  });
+
+  /* ---------- Unduh (dengan nama + perusahaan di bingkai) ---------- */
+  function framed(item){
+    return new Promise(function(resolve){
+      var img=new Image();
+      img.onload=function(){
+        var cv=document.createElement("canvas"), bar=90, b=24;
+        cv.width=img.width+2*b; cv.height=img.height+bar+2*b;
+        var c=cv.getContext("2d");
+        c.fillStyle="#f472b6"; c.fillRect(0,0,cv.width,cv.height); c.fillStyle="#fff"; c.fillRect(b,img.height+b,img.width,bar);
+        c.drawImage(img,b,b);
+        c.fillStyle="#1c1b19"; c.font="bold 28px system-ui,sans-serif"; c.textBaseline="middle";
+        c.fillText(item.name, b+20, img.height+b+bar/2, img.width-40);
+        cv.toBlob(resolve,"image/jpeg",0.92);
+      };
+      img.src=item.img;
+    });
+  }
+  function download(item){
+    var fname="memory-"+item.name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"")+".jpg";
+    return Promise.all([framed(item), window.claude&&window.claude.use?window.claude.use("downloads"):null]).then(function(r){
+      if(r[1]) return r[1].save({ filename:fname, data:r[0] });
+      // Di luar claude.ai: unduh biasa lewat link
+      var a=document.createElement("a"); a.href=URL.createObjectURL(r[0]); a.download=fname;
+      document.body.appendChild(a); a.click(); a.remove();
+    }).catch(function(){});
+  }
+  $("btn-dl").addEventListener("click", function(){
+    download({ name:state.name, img:state.img });
+  });
+
+  /* ---------- Dinding ---------- */
+  function renderWall(list){
+    var g=$("grid"); g.textContent="";
+    $("count").textContent=list.length+" kenangan";
+    $("empty").classList.toggle("hidden", list.length>0);
+    list.forEach(function(it,idx){
+      var t=document.createElement("div"); t.className="tile"; var k=it.ts+"|"+it.name; state.seen=state.seen||{}; if(!state.seen[k]){ state.seen[k]=1; t.className+=" new"; t.style.setProperty("--d",(Math.min(idx,8)*0.08)+"s"); } t.style.setProperty("--r",(((it.ts%5)-2)*0.8)+"deg");
+      var im=document.createElement("img"); im.src=it.img; im.alt="Foto "+it.name; im.loading="lazy";
+      var m=document.createElement("div"); m.className="meta";
+      var n=document.createElement("b"); n.textContent=it.name;
+      
+      
+      m.appendChild(n);
+      t.appendChild(im); t.appendChild(m); g.appendChild(t);
+    });
+  }
+  function startWall(){
+    renderWall(state.localList);
+    if(state.unsub) return;
+    var timer=setTimeout(function(){ $("count").textContent=state.localList.length+" kenangan (mode lokal)"; },10000);
+    getDb().then(function(db){
+      if(!db){ clearTimeout(timer); $("count").textContent=state.localList.length+" kenangan (mode lokal)"; return; }
+      state.unsub=db.collection("memories").orderBy("ts","desc").limit(60).onSnapshot(function(snap){
+        clearTimeout(timer);
+        renderWall(snap.docs.map(function(d){ return d.data(); }));
+      }, function(){ clearTimeout(timer); });
+    });
+  }
+
+  route();
+})();
+</script>
+</body>
+</html>
